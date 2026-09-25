@@ -1,102 +1,25 @@
 /**
- * Operational Alert Rule Engine
- * ------------------------------
- * Evaluates real-time telemetry metrics against operational limits.
+ * alerts.js — DEPRECATED
+ * -----------------------
+ * This file previously contained the frontend AlertEngine class
+ * that evaluated alert rules inside the React browser.
+ *
+ * ARCHITECTURE CHANGE (v2.1):
+ * Alert evaluation has been CENTRALISED in the backend.
+ * The authoritative alert engine is: backend/services/alert_engine.py
+ * It runs on every POST /api/telemetry ingestion and persists results to SQLite.
+ * React fetches alerts through GET /api/alerts via src/api.js.
+ *
+ * Alert rules (preserved in backend):
+ *   - temperature_celsius > 80°C  → CRITICAL Thermal
+ *   - temperature_celsius > 68°C  → WARNING  Thermal
+ *   - signal_strength_dbm < -90   → CRITICAL RF Link
+ *   - signal_strength_dbm < -78   → WARNING  RF Link
+ *   - packet_loss_percent > 5%    → WARNING/CRITICAL Network
+ *
+ * This file is kept as a placeholder. It exports nothing.
+ * Do NOT re-add alert evaluation logic to this file.
  */
 
-export class AlertEngine {
-  constructor() {
-    this.alerts = [];
-  }
-
-  evaluate(devices, timestamp) {
-    devices.forEach(dev => {
-      if (dev.currentTemp > 80) {
-        this.addAlert({
-          id: `ALT-${dev.id}-TEMP`,
-          nodeId: dev.id,
-          nodeName: dev.name,
-          severity: "CRITICAL",
-          category: "Thermal",
-          message: `Thermal Overheat: Core temperature reached ${dev.currentTemp}°C (Limit: 80°C)`,
-          timestamp
-        });
-      } else if (dev.currentTemp > 68) {
-        this.addAlert({
-          id: `ALT-${dev.id}-TEMP-WARN`,
-          nodeId: dev.id,
-          nodeName: dev.name,
-          severity: "WARNING",
-          category: "Thermal",
-          message: `Elevated Temperature: Core temperature at ${dev.currentTemp}°C`,
-          timestamp
-        });
-      }
-
-      if (dev.currentSignal < -90) {
-        this.addAlert({
-          id: `ALT-${dev.id}-SIG`,
-          nodeId: dev.id,
-          nodeName: dev.name,
-          severity: "CRITICAL",
-          category: "RF Link",
-          message: `RF Link Degraded: Signal dropped to ${dev.currentSignal} dBm (Limit: -90 dBm)`,
-          timestamp
-        });
-      }
-
-      if (dev.currentPacketLoss > 5.0) {
-        this.addAlert({
-          id: `ALT-${dev.id}-LOSS`,
-          nodeId: dev.id,
-          nodeName: dev.name,
-          severity: dev.currentPacketLoss > 10.0 ? "CRITICAL" : "WARNING",
-          category: "Network",
-          message: `Packet Loss Spike: Transmission loss at ${dev.currentPacketLoss}%`,
-          timestamp
-        });
-      }
-    });
-  }
-
-  addAlert(alertData) {
-    const existingIndex = this.alerts.findIndex(a => a.id === alertData.id && !a.resolved);
-    if (existingIndex !== -1) {
-      this.alerts[existingIndex].timestamp = alertData.timestamp;
-      this.alerts[existingIndex].message = alertData.message;
-    } else {
-      this.alerts.unshift({
-        ...alertData,
-        resolved: false
-      });
-    }
-  }
-
-  resolveAlert(alertId) {
-    const alert = this.alerts.find(a => a.id === alertId);
-    if (alert) {
-      alert.resolved = true;
-      alert.resolvedAt = new Date().toISOString();
-    }
-  }
-
-  resolveAllForNode(nodeId) {
-    this.alerts.forEach(a => {
-      if (a.nodeId === nodeId) {
-        a.resolved = true;
-        a.resolvedAt = new Date().toISOString();
-      }
-    });
-  }
-
-  getAlerts(filter = "ACTIVE") {
-    if (filter === "ACTIVE") return this.alerts.filter(a => !a.resolved);
-    if (filter === "CRITICAL") return this.alerts.filter(a => a.severity === "CRITICAL" && !a.resolved);
-    if (filter === "WARNING") return this.alerts.filter(a => a.severity === "WARNING" && !a.resolved);
-    return this.alerts;
-  }
-
-  getActiveCount() {
-    return this.alerts.filter(a => !a.resolved).length;
-  }
-}
+// No exports — alert evaluation is backend-authoritative.
+// See: backend/services/alert_engine.py
