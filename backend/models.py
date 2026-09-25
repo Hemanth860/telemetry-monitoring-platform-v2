@@ -1,7 +1,7 @@
 """
 SQLAlchemy ORM Data Models
 ---------------------------
-Defines database table schemas for Users, Devices, Telemetry Logs, and Alerts.
+Defines database table schemas for Users, Devices, Telemetry Logs, Alerts, and Predictions.
 """
 
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime
@@ -65,3 +65,21 @@ class AlertRecord(Base):
     resolved = Column(Boolean, default=False)
     resolved_at = Column(DateTime, nullable=True)
     resolved_by = Column(String, nullable=True)
+
+
+class PredictionRecord(Base):
+    """
+    Stores the latest heuristic prediction per device.
+    Upserted on every telemetry ingestion cycle.
+    """
+    __tablename__ = "prediction_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, index=True, nullable=False)
+    device_name = Column(String, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    risk_score = Column(Integer, nullable=False)
+    risk_level = Column(String, nullable=False)
+    primary_failure_mode = Column(String, nullable=False)
+    ettf = Column(String, nullable=False)
+    recommended_action = Column(String, nullable=False)
