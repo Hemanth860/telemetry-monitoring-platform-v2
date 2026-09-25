@@ -2,29 +2,44 @@
 Telemetry Simulator Service
 ---------------------------
 Encapsulates physics-correlated telemetry generation equations.
+Preserves the existing correlated telemetry behavior (EMA thermal drift,
+exponential packet loss scaling, RF attenuation, anomaly injection).
+
+This module is used:
+  1. During backend startup to pre-seed 50 historical samples.
+  2. By the standalone simulator runner (backend/simulator_runner.py)
+     which POSTs generated telemetry to POST /api/telemetry.
+
+The simulator no longer drives the API endpoints directly.
+The backend's GET /api/telemetry endpoint now reads from the database.
 """
 
 import random
 from datetime import datetime
 
 INITIAL_DEVICES = [
-    {"id": "SAT-101", "name": "Orbital SatCom Alpha", "type": "Satellite", "orbit": "GEO (35,786 km)", "location": "0.0° N, 89.0° W", "band": "Ka-Band", "base_cpu": 45, "base_temp": 52.0, "base_signal": -62.0, "base_latency": 138, "battery": 98},
-    {"id": "SAT-102", "name": "Orbital SatCom Beta", "type": "Satellite", "orbit": "GEO (35,786 km)", "location": "0.0° N, 69.9° W", "band": "Ka-Band", "base_cpu": 40, "base_temp": 48.0, "base_signal": -58.0, "base_latency": 132, "battery": 95},
-    {"id": "SAT-103", "name": "GeoLink Express 1", "type": "Satellite", "orbit": "GEO (35,786 km)", "location": "0.0° N, 115.1° W", "band": "Ka/Ku-Band", "base_cpu": 55, "base_temp": 56.0, "base_signal": -65.0, "base_latency": 142, "battery": 91},
-    {"id": "SAT-104", "name": "SkyBeam Transponder 4", "type": "Satellite", "orbit": "GEO (35,786 km)", "location": "0.0° N, 111.1° W", "band": "Ka-Band", "base_cpu": 50, "base_temp": 54.0, "base_signal": -64.0, "base_latency": 140, "battery": 94},
-    {"id": "SAT-105", "name": "EMEA Orbital Gateway", "type": "Satellite", "orbit": "GEO (35,786 km)", "location": "0.0° N, 9.0° E", "band": "Ka-Band", "base_cpu": 62, "base_temp": 61.0, "base_signal": -68.0, "base_latency": 148, "battery": 89},
-    {"id": "SAT-106", "name": "APAC Telemetry Node", "type": "Satellite", "orbit": "GEO (35,786 km)", "location": "0.0° N, 110.0° E", "band": "Ka-Band", "base_cpu": 38, "base_temp": 46.0, "base_signal": -60.0, "base_latency": 135, "battery": 97},
-    {"id": "GS-CHENN", "name": "Chennai Earth Station", "type": "Ground Station", "orbit": "Ground Facility", "location": "13.08° N, 80.27° E", "band": "Fiber & Dish Uplink", "base_cpu": 30, "base_temp": 38.0, "base_signal": -52.0, "base_latency": 18, "battery": 100},
-    {"id": "GS-SINGP", "name": "Singapore Uplink Station", "type": "Ground Station", "orbit": "Ground Facility", "location": "1.35° N, 103.81° E", "band": "High-Capacity Optical", "base_cpu": 35, "base_temp": 40.0, "base_signal": -50.0, "base_latency": 15, "battery": 100},
-    {"id": "GS-SYDNY", "name": "Sydney Teleport", "type": "Ground Station", "orbit": "Ground Facility", "location": "33.86° S, 151.20° E", "band": "Ka-Band Ground Gateway", "base_cpu": 28, "base_temp": 36.0, "base_signal": -54.0, "base_latency": 22, "battery": 100},
-    {"id": "GS-AMSTR", "name": "Amsterdam Satellite Gateway", "type": "Ground Station", "orbit": "Ground Facility", "location": "52.36° N, 4.90° E", "band": "Euro-Fiber Uplink", "base_cpu": 42, "base_temp": 41.0, "base_signal": -53.0, "base_latency": 16, "battery": 100}
+    {"id": "SAT-101", "name": "Orbital SatCom Alpha",       "type": "Satellite",      "orbit": "GEO (35,786 km)", "location": "0.0° N, 89.0° W",    "band": "Ka-Band",                 "base_cpu": 45, "base_temp": 52.0, "base_signal": -62.0, "base_latency": 138, "battery": 98},
+    {"id": "SAT-102", "name": "Orbital SatCom Beta",        "type": "Satellite",      "orbit": "GEO (35,786 km)", "location": "0.0° N, 69.9° W",    "band": "Ka-Band",                 "base_cpu": 40, "base_temp": 48.0, "base_signal": -58.0, "base_latency": 132, "battery": 95},
+    {"id": "SAT-103", "name": "GeoLink Express 1",          "type": "Satellite",      "orbit": "GEO (35,786 km)", "location": "0.0° N, 115.1° W",   "band": "Ka/Ku-Band",              "base_cpu": 55, "base_temp": 56.0, "base_signal": -65.0, "base_latency": 142, "battery": 91},
+    {"id": "SAT-104", "name": "SkyBeam Transponder 4",      "type": "Satellite",      "orbit": "GEO (35,786 km)", "location": "0.0° N, 111.1° W",   "band": "Ka-Band",                 "base_cpu": 50, "base_temp": 54.0, "base_signal": -64.0, "base_latency": 140, "battery": 94},
+    {"id": "SAT-105", "name": "EMEA Orbital Gateway",       "type": "Satellite",      "orbit": "GEO (35,786 km)", "location": "0.0° N, 9.0° E",     "band": "Ka-Band",                 "base_cpu": 62, "base_temp": 61.0, "base_signal": -68.0, "base_latency": 148, "battery": 89},
+    {"id": "SAT-106", "name": "APAC Telemetry Node",        "type": "Satellite",      "orbit": "GEO (35,786 km)", "location": "0.0° N, 110.0° E",   "band": "Ka-Band",                 "base_cpu": 38, "base_temp": 46.0, "base_signal": -60.0, "base_latency": 135, "battery": 97},
+    {"id": "GS-CHENN", "name": "Chennai Earth Station",     "type": "Ground Station", "orbit": "Ground Facility", "location": "13.08° N, 80.27° E", "band": "Fiber & Dish Uplink",     "base_cpu": 30, "base_temp": 38.0, "base_signal": -52.0, "base_latency": 18,  "battery": 100},
+    {"id": "GS-SINGP", "name": "Singapore Uplink Station",  "type": "Ground Station", "orbit": "Ground Facility", "location": "1.35° N, 103.81° E", "band": "High-Capacity Optical",   "base_cpu": 35, "base_temp": 40.0, "base_signal": -50.0, "base_latency": 15,  "battery": 100},
+    {"id": "GS-SYDNY", "name": "Sydney Teleport",           "type": "Ground Station", "orbit": "Ground Facility", "location": "33.86° S, 151.20° E","band": "Ka-Band Ground Gateway",  "base_cpu": 28, "base_temp": 36.0, "base_signal": -54.0, "base_latency": 22,  "battery": 100},
+    {"id": "GS-AMSTR", "name": "Amsterdam Satellite Gateway","type": "Ground Station", "orbit": "Ground Facility", "location": "52.36° N, 4.90° E",  "band": "Euro-Fiber Uplink",       "base_cpu": 42, "base_temp": 41.0, "base_signal": -53.0, "base_latency": 16,  "battery": 100},
 ]
 
 
 class TelemetrySimulatorService:
+    """
+    Generates one tick of correlated physics-based telemetry for all devices.
+    Anomaly injection (THERMAL_RUNAWAY, SOLAR_FLARE, PACKET_BURST) is preserved.
+    """
+
     def __init__(self, devices=INITIAL_DEVICES):
         self.devices = [dict(d) for d in devices]
-        self.anomalies = {}
+        self.anomalies: dict = {}
 
     def inject_anomaly(self, device_id: str, anomaly_type: str):
         self.anomalies[device_id] = anomaly_type
@@ -34,6 +49,10 @@ class TelemetrySimulatorService:
             del self.anomalies[device_id]
 
     def generate_tick(self):
+        """
+        Returns a list of telemetry dicts, one per device.
+        Each dict matches the TelemetryIngest schema field names.
+        """
         timestamp = datetime.utcnow()
         batch = []
 
@@ -50,6 +69,7 @@ class TelemetrySimulatorService:
             cpu = max(10, min(99, int(target_cpu)))
             ram = max(15, min(99, int(cpu + 10 + (random.random() - 0.5) * 4)))
 
+            # EMA Thermal Drift: T_target = BaseTemp + 0.35 × (CPU - 40)
             thermal_inertia = (cpu - 40) * 0.35
             target_temp = dev["base_temp"] + thermal_inertia
             if anomaly == "THERMAL_RUNAWAY":
@@ -63,6 +83,7 @@ class TelemetrySimulatorService:
 
             signal = max(-110, min(-40, int(target_signal)))
 
+            # Exponential packet loss scaling with RF signal degradation
             packet_loss = 0.1
             if signal < -85:
                 packet_loss += round((abs(signal) - 85) ** 1.4 * 0.5, 2)
@@ -73,6 +94,7 @@ class TelemetrySimulatorService:
 
             latency = max(5, int(dev["base_latency"] + (random.random() - 0.5) * 6 + (packet_loss * 6)))
 
+            # Operational status thresholds
             status = "HEALTHY"
             if temp > 80 or signal < -90 or packet_loss > 8.0:
                 status = "CRITICAL"
@@ -92,7 +114,7 @@ class TelemetrySimulatorService:
                 "latency_ms": latency,
                 "battery_percent": dev["battery"],
                 "status": status,
-                "anomaly": anomaly
+                "anomaly": anomaly,
             })
 
         return batch
