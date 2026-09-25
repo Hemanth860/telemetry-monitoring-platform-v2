@@ -1,112 +1,183 @@
 import React, { useRef, useEffect } from 'react';
-import { TelemetryChart } from '../charts.js';
 
-export function ChartCanvas({ 
-  targetDevice, 
-  selectedMetric, 
-  selectedNodeId, 
-  onNodeChange, 
-  onMetricChange 
-}) {
+/**
+ * ChartCanvas — HTML5 2D Canvas line chart visualising telemetry history.
+ *
+ * Props:
+ *   historyData   — array of TelemetryResponse records from
+ *                   GET /api/telemetry/history/{device_id}
+ *                   (fetched and managed by App.jsx, NOT generated here)
+ *   selectedMetric — 'cpu' | 'temp' | 'signal' | 'loss' | 'latency'
+ *   selectedNodeId — device ID string
+ *   devices        — fleet devices array (for node selector dropdown)
+ *   onNodeChange   — callback(nodeId)
+ *   onMetricChange — callback(metric)
+ *
+ * This component is PURELY a visualiser. It does not generate data.
+ * Data source: SQLite → FastAPI → GET /api/telemetry/history → App.jsx → here.
+ */
+
+const METRIC_CONFIG = {
+  cpu:     { label: 'CPU %',        key: 'cpu_percent',          min: 0,    max: 100,  unit: '%',   color: '#06b6d4' },
+  temp:    { label: 'Temperature',  key: 'temperature_celsius',  min: 20,   max: 100,  unit: '°C',  color: '#f59e0b' },
+  signal:  { label: 'RF Signal',    key: 'signal_strength_dbm',  min: -110, max: -40,  unit: ' dBm',color: '#3b82f6' },
+  loss:    { label: 'Packet Loss',  key: 'packet_loss_percent',  min: 0,    max: 25,   unit: '%',   color: '#ef4444' },
+  latency: { label: 'Latency',      key: 'latency_ms',           min: 0,    max: 500,  unit: ' ms', color: '#8b5cf6' },
+};
+
+export function ChartCanvas({ historyData, selectedMetric, selectedNodeId, devices, onNodeChange, onMetricChange }) {
   const canvasRef = useRef(null);
-  const chartInstanceRef = useRef(null);
 
-  const METRIC_SPECS = {
-    cpu: { label: "CPU Load", unit: "%", color: "#06b6d4", threshold: 80, min: 0, max: 100 },
-    temp: { label: "Thermal Temp", unit: "°C", color: "#ef4444", threshold: 80, min: 20, max: 95 },
-    signal: { label: "Signal Strength", unit: "dBm", color: "#3b82f6", threshold: -90, min: -110, max: -40 },
-    latency: { label: "Latency", unit: "ms", color: "#8b5cf6", threshold: 200, min: 0 },
-    packetLoss: { label: "Packet Loss", unit: "%", color: "#f59e0b", threshold: 5, min: 0, max: 25 }
-  };
+  const metric = METRIC_CONFIG[selectedMetric] || METRIC_CONFIG.cpu;
 
   useEffect(() => {
-    if (canvasRef.current) {
-      chartInstanceRef.current = new TelemetryChart(canvasRef.current);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    const W = canvas.offsetWidth;
+    const H = canvas.offsetHeight;
+    canvas.width  = W;
+    canvas.height = H;
+
+    const pad = { top: 20, right: 20, bottom: 30, left: 50 };
+    const chartW = W - pad.left - pad.right;
+    const chartH = H - pad.top - pad.bottom;
+
+    // Clear
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(9, 13, 22, 0.0)';
+    ctx.fillRect(0, 0, W, H);
+
+    const data = (historyData || []).map(r => r[metric.key]).filter(v => v !== undefined && v !== null);
+
+    if (data.length < 2) {
+      ctx.fillStyle = 'rgba(100,116,139,0.8)';
+      ctx.font = '13px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(
+        historyData.length === 0
+          ? 'Awaiting telemetry from backend...'
+          : 'Not enough data points yet',
+        W / 2, H / 2
+      );
+      return;
     }
-  }, []);
 
-  useEffect(() => {
-    if (!chartInstanceRef.current || !targetDevice || !targetDevice.history) return;
+    const minVal = metric.min;
+    const maxVal = metric.max;
 
-    const spec = METRIC_SPECS[selectedMetric];
-    const chartData = targetDevice.history.map(sample => ({
-      val: sample[selectedMetric],
-      time: new Date(sample.timestamp).toLocaleTimeString()
-    }));
+    const toX = (i) => pad.left + (i / (data.length - 1)) * chartW;
+    const toY = (v) => pad.top + chartH - ((v - minVal) / (maxVal - minVal)) * chartH;
 
-    chartInstanceRef.current.render({
-      data: chartData,
-      label: spec.label,
-      unit: spec.unit,
-      color: spec.color,
-      thresholdValue: spec.threshold,
-      minVal: spec.min,
-      maxVal: spec.max
-    });
-  }, [targetDevice, selectedMetric]);
+    // Grid lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1;
+    const gridLines = 4;
+    for (let i = 0; i <= gridLines; i++) {
+      const y = pad.top + (i / gridLines) * chartH;
+      ctx.beginPath();
+      ctx.moveTo(pad.left, y);
+      ctx.lineTo(pad.left + chartW, y);
+      ctx.stroke();
 
-  const spec = METRIC_SPECS[selectedMetric];
-  const history = targetDevice?.history || [];
-  const vals = history.map(d => d[selectedMetric]);
-  const currentVal = vals.length > 0 ? vals[vals.length - 1] : "--";
-  const minVal = vals.length > 0 ? Math.min(...vals) : "--";
-  const maxVal = vals.length > 0 ? Math.max(...vals) : "--";
-  const avgVal = vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : "--";
+      const val = maxVal - (i / gridLines) * (maxVal - minVal);
+      ctx.fillStyle = 'rgba(100,116,139,0.8)';
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(val.toFixed(0) + metric.unit, pad.left - 5, y + 4);
+    }
+
+    // Gradient fill under line
+    const gradient = ctx.createLinearGradient(0, pad.top, 0, pad.top + chartH);
+    gradient.addColorStop(0, metric.color + '44');
+    gradient.addColorStop(1, metric.color + '00');
+
+    ctx.beginPath();
+    ctx.moveTo(toX(0), toY(data[0]));
+    for (let i = 1; i < data.length; i++) {
+      ctx.lineTo(toX(i), toY(data[i]));
+    }
+    ctx.lineTo(toX(data.length - 1), pad.top + chartH);
+    ctx.lineTo(toX(0), pad.top + chartH);
+    ctx.closePath();
+    ctx.fillStyle = gradient;
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    ctx.strokeStyle = metric.color;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.moveTo(toX(0), toY(data[0]));
+    for (let i = 1; i < data.length; i++) {
+      ctx.lineTo(toX(i), toY(data[i]));
+    }
+    ctx.stroke();
+
+    // Latest value dot
+    const lastX = toX(data.length - 1);
+    const lastY = toY(data[data.length - 1]);
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+    ctx.fillStyle = metric.color;
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+  }, [historyData, selectedMetric, metric]);
+
+  // Compute stats from history
+  const metricValues = (historyData || []).map(r => r[metric.key]).filter(v => v !== undefined && v !== null);
+  const latest  = metricValues.length > 0 ? metricValues[metricValues.length - 1] : null;
+  const minStat = metricValues.length > 0 ? Math.min(...metricValues).toFixed(1) : '--';
+  const maxStat = metricValues.length > 0 ? Math.max(...metricValues).toFixed(1) : '--';
 
   return (
-    <section class="card" id="streaming-chart-section" style={{ marginBottom: '1.5rem' }}>
-      <div class="card-title">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <span>📈 Real-Time Telemetry Streaming Graph</span>
-          <span class="mono" style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', background: 'rgba(6, 182, 212, 0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
-            50-Sample Window
+    <section className="card" id="streaming-chart-section" style={{ marginBottom: '1.5rem' }}>
+      <div className="chart-toolbar">
+        <div className="card-title" style={{ margin: 0 }}>
+          <span>📈 Telemetry History Stream</span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '0.75rem' }}>
+            Source: SQLite → GET /api/telemetry/history/{selectedNodeId}
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Target Node:</span>
-          <select 
-            value={selectedNodeId} 
-            onChange={(e) => onNodeChange(e.target.value)} 
-            class="select-dropdown"
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <select
+            className="select-dropdown"
+            value={selectedNodeId}
+            onChange={e => onNodeChange(e.target.value)}
           >
-            <option value="SAT-101">SAT-101 (Orbital SatCom Alpha)</option>
-            <option value="SAT-102">SAT-102 (Orbital SatCom Beta)</option>
-            <option value="SAT-103">SAT-103 (GeoLink Express 1)</option>
-            <option value="SAT-104">SAT-104 (SkyBeam Transponder 4)</option>
-            <option value="SAT-105">SAT-105 (EMEA Orbital Gateway)</option>
-            <option value="SAT-106">SAT-106 (APAC Telemetry Node)</option>
-            <option value="GS-CHENN">GS-CHENN (Chennai Earth Station)</option>
-            <option value="GS-SINGP">GS-SINGP (Singapore Uplink Station)</option>
-            <option value="GS-SYDNY">GS-SYDNY (Sydney Teleport)</option>
-            <option value="GS-AMSTR">GS-AMSTR (Amsterdam Gateway)</option>
+            {(devices || []).map(d => (
+              <option key={d.id} value={d.id}>{d.id} — {d.name}</option>
+            ))}
           </select>
+
+          <div className="metric-select-tabs">
+            {Object.entries(METRIC_CONFIG).map(([key, cfg]) => (
+              <button
+                key={key}
+                className={`chart-tab-btn ${selectedMetric === key ? 'active' : ''}`}
+                onClick={() => onMetricChange(key)}
+              >
+                {cfg.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div class="chart-toolbar">
-        <div class="metric-select-tabs">
-          {Object.keys(METRIC_SPECS).map(metricKey => (
-            <button 
-              key={metricKey}
-              class={`chart-tab-btn ${selectedMetric === metricKey ? 'active' : ''}`}
-              onClick={() => onMetricChange(metricKey)}
-            >
-              {METRIC_SPECS[metricKey].label}
-            </button>
-          ))}
-        </div>
-
-        <div class="chart-stats-group mono">
-          <div>Current: <span style={{ color: spec.color, fontWeight: 700 }}>{currentVal} {spec.unit}</span></div>
-          <div>Min: <span>{minVal} {spec.unit}</span></div>
-          <div>Max: <span>{maxVal} {spec.unit}</span></div>
-          <div>Avg: <span>{avgVal} {spec.unit}</span></div>
-        </div>
+      <div className="chart-stats-group" style={{ marginBottom: '0.75rem' }}>
+        <span>Samples: {metricValues.length}</span>
+        <span>Latest: {latest !== null ? latest.toFixed(1) + metric.unit : '--'}</span>
+        <span>Min: {minStat}{minStat !== '--' ? metric.unit : ''}</span>
+        <span>Max: {maxStat}{maxStat !== '--' ? metric.unit : ''}</span>
       </div>
 
-      <div class="canvas-wrapper">
-        <canvas ref={canvasRef} height="240"></canvas>
+      <div className="canvas-wrapper">
+        <canvas ref={canvasRef} style={{ width: '100%', height: '100%' }} />
       </div>
     </section>
   );
