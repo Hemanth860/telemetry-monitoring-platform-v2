@@ -22,8 +22,9 @@ Base = declarative_base()
 def init_db():
     """
     Initializes SQLite database tables defined by SQLAlchemy ORM models.
+    Safe to call on every startup — only creates tables that do not exist.
     """
-    import models
+    import models  # noqa: F401 – registers models with Base.metadata
     Base.metadata.create_all(bind=engine)
 
 
