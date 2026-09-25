@@ -2,6 +2,7 @@
 Authentication Router (/api/auth/*)
 ------------------------------------
 Provides JWT registration and login authentication endpoints.
+Unchanged from original implementation.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -29,7 +30,7 @@ def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
         username=user_in.username,
         email=user_in.email,
         hashed_password=hash_password(user_in.password),
-        role=role
+        role=role,
     )
     db.add(new_user)
     db.commit()
@@ -51,5 +52,5 @@ def login(user_in: UserLogin, db: Session = Depends(get_db)):
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": user
+        "user": user,
     }
