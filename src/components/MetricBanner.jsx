@@ -1,70 +1,83 @@
 import React from 'react';
 
-export function MetricBanner({ devices }) {
-  const total = devices.length || 10;
-  const healthy = devices.filter(d => d.status === "HEALTHY").length;
-  const warnings = devices.filter(d => d.status === "WARNING").length;
-  const criticals = devices.filter(d => d.status === "CRITICAL").length;
-  const totalIncidents = warnings + criticals;
+/**
+ * MetricBanner — Overview metrics cards at the top of the dashboard.
+ *
+ * Props:
+ *   devices         — device fleet array (with merged telemetry fields)
+ *   latestTelemetry — raw telemetry response array from GET /api/telemetry
+ *   alerts          — alert array from GET /api/alerts
+ *
+ * Data comes from the backend via App.jsx polling — NOT generated here.
+ */
+export function MetricBanner({ devices, latestTelemetry, alerts }) {
+  const totalDevices   = devices.length;
+  const criticalCount  = devices.filter(d => d.status === 'CRITICAL').length;
+  const warningCount   = devices.filter(d => d.status === 'WARNING').length;
+  const healthyCount   = devices.filter(d => d.status === 'HEALTHY').length;
 
-  const healthScore = Math.round((healthy / total) * 100);
-  const avgLatency = Math.round(devices.reduce((acc, d) => acc + (d.currentLatency || 100), 0) / total);
-  const avgSignal = Math.round(devices.reduce((acc, d) => acc + (d.currentSignal || -60), 0) / total);
+  const avgCpu = latestTelemetry.length > 0
+    ? (latestTelemetry.reduce((sum, t) => sum + (t.cpu_percent || 0), 0) / latestTelemetry.length).toFixed(1)
+    : '--';
+
+  const avgTemp = latestTelemetry.length > 0
+    ? (latestTelemetry.reduce((sum, t) => sum + (t.temperature_celsius || 0), 0) / latestTelemetry.length).toFixed(1)
+    : '--';
+
+  const activeAlerts = alerts.filter(a => !a.resolved);
+  const criticalAlerts = activeAlerts.filter(a => a.severity === 'CRITICAL').length;
+  const warningAlerts  = activeAlerts.filter(a => a.severity === 'WARNING').length;
+  const totalIncidents = activeAlerts.length;
 
   return (
-    <section class="grid-container summary-grid" style={{ marginBottom: '1.5rem' }}>
-      <div class="metric-card">
-        <div class="metric-header">
-          <span>Fleet Health Score</span>
-          <span class="metric-icon">💚</span>
+    <section className="metric-banner">
+      <div className="metric-card">
+        <div className="metric-label">
+          <span>Fleet Status</span>
+          <span className="metric-icon">🛰</span>
         </div>
-        <div class="metric-value" style={{ color: healthScore === 100 ? 'var(--status-healthy)' : healthScore > 75 ? 'var(--status-warning)' : 'var(--status-critical)' }}>
-          {healthScore}%
+        <div className="metric-value" style={{ color: criticalCount > 0 ? 'var(--status-critical)' : warningCount > 0 ? 'var(--status-warning)' : 'var(--status-healthy)' }}>
+          {totalDevices > 0 ? (criticalCount > 0 ? 'CRITICAL' : warningCount > 0 ? 'WARNING' : 'NOMINAL') : '--'}
         </div>
-        <div class="metric-subtext">
-          {healthScore === 100 ? `All ${total} nodes operating within limits` : `${totalIncidents} node(s) require operational review`}
+        <div className="metric-subtext">
+          {healthyCount} Healthy · {warningCount} Warning · {criticalCount} Critical
         </div>
       </div>
 
-      <div class="metric-card">
-        <div class="metric-header">
-          <span>Active Fleet Nodes</span>
-          <span class="metric-icon">🛰️</span>
+      <div className="metric-card">
+        <div className="metric-label">
+          <span>Avg CPU Utilisation</span>
+          <span className="metric-icon">⚙</span>
         </div>
-        <div class="metric-value">
-          {total} <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 400 }}>/ {total}</span>
+        <div className="metric-value" style={{ color: parseFloat(avgCpu) > 80 ? 'var(--status-critical)' : parseFloat(avgCpu) > 65 ? 'var(--status-warning)' : 'var(--accent-cyan)' }}>
+          {avgCpu}{avgCpu !== '--' ? '%' : ''}
         </div>
-        <div class="metric-subtext">6 Satellites • 4 Ground Stations</div>
+        <div className="metric-subtext">Fleet average across {latestTelemetry.length} nodes</div>
       </div>
 
-      <div class="metric-card">
-        <div class="metric-header">
-          <span>Average Network Latency</span>
-          <span class="metric-icon">⚡</span>
+      <div className="metric-card">
+        <div className="metric-label">
+          <span>Avg Core Temperature</span>
+          <span className="metric-icon">🌡</span>
         </div>
-        <div class="metric-value">{avgLatency} ms</div>
-        <div class="metric-subtext">SAT GEO ~135ms • GS ~17ms</div>
+        <div className="metric-value" style={{ color: parseFloat(avgTemp) > 80 ? 'var(--status-critical)' : parseFloat(avgTemp) > 68 ? 'var(--status-warning)' : 'var(--status-healthy)' }}>
+          {avgTemp}{avgTemp !== '--' ? '°C' : ''}
+        </div>
+        <div className="metric-subtext">Thermal limit: 80°C</div>
       </div>
 
-      <div class="metric-card">
-        <div class="metric-header">
-          <span>RF Signal Index</span>
-          <span class="metric-icon">📶</span>
-        </div>
-        <div class="metric-value">{avgSignal} dBm</div>
-        <div class="metric-subtext" style={{ color: 'var(--status-healthy)' }}>Strong RF link telemetry</div>
-      </div>
-
-      <div class="metric-card">
-        <div class="metric-header">
+      <div className="metric-card">
+        <div className="metric-label">
           <span>Active Fleet Incidents</span>
-          <span class="metric-icon">🚨</span>
+          <span className="metric-icon">🚨</span>
         </div>
-        <div class="metric-value" style={{ color: totalIncidents === 0 ? 'var(--status-healthy)' : criticals > 0 ? 'var(--status-critical)' : 'var(--status-warning)' }}>
+        <div className="metric-value" style={{ color: totalIncidents === 0 ? 'var(--status-healthy)' : criticalAlerts > 0 ? 'var(--status-critical)' : 'var(--status-warning)' }}>
           {totalIncidents}
         </div>
-        <div class="metric-subtext">
-          {totalIncidents === 0 ? 'Zero active warnings' : `${criticals} Critical • ${warnings} Warning`}
+        <div className="metric-subtext">
+          {totalIncidents === 0
+            ? 'Zero active warnings'
+            : `${criticalAlerts} Critical · ${warningAlerts} Warning`}
         </div>
       </div>
     </section>
